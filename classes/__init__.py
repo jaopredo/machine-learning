@@ -4,12 +4,12 @@ from numpy import ndarray
 
 class Algorithm(ABC):
     @abstractmethod
-    def fit(self, X: ndarray, t: ndarray):
+    def fit(self, X: ndarray, T: ndarray) -> list[float]:
         """Fits the model onto the data
 
         Args:
             X (ndarray): NxD array of N samples and D features
-            t (ndarray): Nx1 array of N target values
+            T (ndarray): Nx1 array of N target values
         """
         pass
     
