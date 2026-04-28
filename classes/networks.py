@@ -1,5 +1,5 @@
 from classes import Algorithm
-from typing import Callable, Any
+from typing import Callable, Any, Literal
 import numpy as np
 
 
@@ -11,7 +11,8 @@ class NeuralNetwork(Algorithm):
         output_activation_derivative: Callable[[np.ndarray], np.ndarray],
         activations: list[Callable[[np.ndarray], np.ndarray]],
         activations_derivatives: list[Callable[[np.ndarray], np.ndarray]],
-        error_function: Callable[[np.ndarray, np.ndarray, list[np.ndarray]], np.floating[Any]]
+        error_function: Callable[[np.ndarray, np.ndarray, list[np.ndarray]], np.floating[Any]],
+        initialization: Literal["xavier", "he"] = "xavier",
     ):
         """Initializes a NeuralNetwork that can be used for regressions and classifications depending on the
         `activation` functions passed. 
@@ -30,7 +31,6 @@ class NeuralNetwork(Algorithm):
         error_function: Callable[[np.ndarray, np.ndarray, list[np.ndarray]], np.floating[Any]]
             The error function used to calculate the error history on the training method
         """
-        
         self.h = activations + [output_activation]
         self.dh = activations_derivatives + [output_activation_derivative]
         self._layers_dimensions = layers_dimensions
@@ -39,6 +39,7 @@ class NeuralNetwork(Algorithm):
         self.b: list[np.ndarray] = []
         self.A: list[np.ndarray] = []
         self.Z: list[np.ndarray] = []
+        self.initialization = initialization
 
 
     def predict(
@@ -100,7 +101,8 @@ class NeuralNetwork(Algorithm):
         X: np.ndarray,
         T: np.ndarray,
         learning_rate: float = 0.01,
-        lambd: float = 0
+        lambd: float = 0,
+        max_norm: float = 5.0
     ):
         """This function calculates the backpropagation of the data passed as an argument, updating the weights and bias
 
@@ -143,6 +145,9 @@ class NeuralNetwork(Algorithm):
         
         # After I calculated all my gradients, I need to update my weights and bias
         for layer in range(P+1):
+            norm = np.linalg.norm(dW[layer])
+            if norm > max_norm:
+                dW[layer] = dW[layer] / norm * max_norm
             W[layer] -= learning_rate * dW[layer]
             b[layer] -= learning_rate * db[layer]
 
@@ -151,7 +156,8 @@ class NeuralNetwork(Algorithm):
         T: np.ndarray,
         learning_rate: float = 0.01,
         epochs: int = 1000,
-        lambd: float = 0
+        lambd: float = 0,
+        max_norm: float = 5.0
     ) -> list[float]:
         """This function trains the weights based on the data passed and the target given
 
@@ -183,21 +189,31 @@ class NeuralNetwork(Algorithm):
         for i in range(P+1):
             if i == 0:
                 fan_in = X.shape[1]
-                W.append(np.random.normal(0, np.sqrt(1 / fan_in), (X.shape[1], self._layers_dimensions[i])))
-                b.append(np.random.normal(0, np.sqrt(1 / fan_in), (1, self._layers_dimensions[i])))
+                fan_out = self._layers_dimensions[i]
             elif i == P:
+                fan_in = self._layers_dimensions[i-1]
                 fan_out = T.shape[1]
-                W.append(np.random.normal(0, np.sqrt(1 / fan_out), (self._layers_dimensions[i-1], T.shape[1])))
-                b.append(np.random.normal(0, np.sqrt(1 / fan_out), (1, T.shape[1])))
             else:
-                W.append(np.random.normal(0, np.sqrt(1 / self._layers_dimensions[i-1]), (self._layers_dimensions[i-1], self._layers_dimensions[i])))
-                b.append(np.random.normal(0, np.sqrt(1 / self._layers_dimensions[i-1]), (1, self._layers_dimensions[i])))
+                fan_in = self._layers_dimensions[i-1]
+                fan_out = self._layers_dimensions[i]
+
+            if self.initialization == "xavier":
+                std = np.sqrt(1 / fan_in)
+            elif self.initialization == "he":
+                std = np.sqrt(2 / fan_in)
+            else:
+                raise ValueError("Unknown initialization")
+
+            W.append(np.random.normal(0, std, (fan_in, fan_out)))
+            
+            # 🔥 Bias: melhor usar zero (mais estável)
+            b.append(np.zeros((1, fan_out)))
 
         for epoch in range(epochs):
             # Make the forward propagation, obtaining A and Z for each layer
             self.A, self.Z = self.forward_propagation(X)
             # Now I make the backpropagation, calculating the error and updating the weights and bias
             errs.append(self._error_function(T, self.Z[-1], self.W))
-            self.back_propagation(X, T, learning_rate, lambd)
+            self.back_propagation(X, T, learning_rate, lambd, max_norm)
         
         return errs

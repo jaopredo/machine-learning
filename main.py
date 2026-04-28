@@ -17,29 +17,25 @@ X_test = X_test.to_numpy()
 t_test = t_test.to_numpy().reshape(-1, 1)
 
 
-def sigmoid(x):
-    x = np.clip(x, -500, 500)
-    return 1 / (1 + np.exp(-x))
+def tanh(x: np.ndarray) -> np.ndarray:
+    # np.tanh já é estável numericamente
+    return np.tanh(x)
 
-def d_sigmoid(x):
-    return sigmoid(x) * sigmoid(-x)
-
-
-def reLU(x):
-    return np.maximum(0, x)
-
-def d_reLU(x):
-    return (x > 0).astype(float)
+def d_tanh(x: np.ndarray) -> np.ndarray:
+    # derivada: 1 - tanh^2(x)
+    t = np.tanh(x)
+    return 1 - t**2
 
 
 lambd = 0.01
 
 network = NeuralNetwork(
     layers_dimensions=[30, 50, 100],
-    activations=[sigmoid, sigmoid, sigmoid],
+    initialization="xavier",
+    activations=[tanh, tanh, tanh],
     output_activation=lambda x: x,
     output_activation_derivative=lambda x: x,
-    activations_derivatives=[d_sigmoid, d_sigmoid, d_sigmoid],
+    activations_derivatives=[d_tanh, d_tanh, d_tanh],
     # Mean Squared Error
     error_function=lambda t, y, w: np.linalg.norm(t-y, 'fro')**2 / t.shape[0] + lambd/2 * sum(np.linalg.norm(wi, 'fro')**2 for wi in w)
 )
