@@ -1,4 +1,3 @@
-from typing import Callable, Any
 import numpy as np
 import networkx as nx
 import torch
@@ -123,6 +122,8 @@ class GraphConvolutionNetwork(nn.Module):
                     activations[i],
                     self.device
                 )
+            if isinstance(layer, LinearLayer):
+                layer.set_adjacency_matrix(self.norm_A)  # Set the normalized adjacency matrix for the current layer
             self.layers.append(layer)
 
 
@@ -137,8 +138,6 @@ class GraphConvolutionNetwork(nn.Module):
         """
         Z = self.X
         for layer in self.layers:
-            if isinstance(layer, LinearLayer):
-                layer.set_adjacency_matrix(self.norm_A)  # Set the normalized adjacency matrix for the current layer
             Z = layer.forward(Z)
         return Z
 
