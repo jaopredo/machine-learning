@@ -1,54 +1,114 @@
-import pandas as pd
-from sklearn.model_selection import train_test_split
+import networkx as nx
 import numpy as np
-import matplotlib.pyplot as plt
+import pandas as pd
+import torch
+from classes.gnn import GraphConvolutionNetwork
+from functions import Identity, LeakyReLU, BinaryCrossEntropyWithLogitsLoss
+from sklearn.preprocessing import StandardScaler
 
-from classes.networks import NeuralNetwork
+np.random.seed(42)
+n = 200  # usuários
 
-data = pd.read_csv("data/housing.csv")
+# =========================
+# 1. FEATURES
+# =========================
+features = pd.DataFrame({
+    'idade':        np.random.randint(13, 70, n),
+    'genero':       np.random.randint(0, 2, n),
+    'num_posts':    np.random.randint(0, 500, n),
+    'num_amigos':   np.random.randint(1, 300, n),
+    'conta_nova':   np.random.randint(0, 2, n),
+})
 
-t = data["MEDV"]
-X = data.drop("MEDV", axis=1)
+# =========================
+# 2. "GROUND TRUTH" (com ruído)
+# =========================
 
-X_train, X_test, t_train, t_test = train_test_split(X, t, test_size=0.2, random_state=42)
-X_train = X_train.to_numpy()
-t_train = t_train.to_numpy().reshape(-1, 1)
-X_test = X_test.to_numpy()
-t_test = t_test.to_numpy().reshape(-1, 1)
-
-
-def tanh(x: np.ndarray) -> np.ndarray:
-    # np.tanh já é estável numericamente
-    return np.tanh(x)
-
-def d_tanh(x: np.ndarray) -> np.ndarray:
-    # derivada: 1 - tanh^2(x)
-    t = np.tanh(x)
-    return 1 - t**2
-
-
-lambd = 0.01
-
-network = NeuralNetwork(
-    layers_dimensions=[30, 50, 100],
-    initialization="xavier",
-    activations=[tanh, tanh, tanh],
-    output_activation=lambda x: x,
-    output_activation_derivative=lambda x: x,
-    activations_derivatives=[d_tanh, d_tanh, d_tanh],
-    # Mean Squared Error
-    error_function=lambda t, y, w: np.linalg.norm(t-y, 'fro')**2 / t.shape[0] + lambd/2 * sum(np.linalg.norm(wi, 'fro')**2 for wi in w)
+# score contínuo (mais realista que regra hard)
+score = (
+    2.0 * features['conta_nova'] +
+    0.01 * features['num_posts'] -
+    0.01 * features['num_amigos'] +
+    np.random.normal(0, 0.5, n)  # ruído
 )
 
-errs = network.fit(X_train, t_train, learning_rate=0.001, epochs=1000, lambd=lambd)
+# transforma em probabilidade
+prob = 1 / (1 + np.exp(-score))
 
-y_test = network.predict(X_test)
+# amostra binária
+fraude_true = (np.random.rand(n) < prob).astype(int)
 
-print(np.mean((t_test - y_test) ** 2))
+features['fraude_true'] = fraude_true
+
+print(f"Fraudes reais: {fraude_true.sum()} / {n}")
+
+# =========================
+# 3. LABELS OBSERVADOS (parciais)
+# =========================
+
+# regra de alta confiança (como você fez)
+high_confidence = (
+    (features['conta_nova'] == 1) &
+    (features['num_posts'] > 300) &
+    (features['num_amigos'] < 50)
+)
+
+# inicializa como "desconhecido"
+fraude_obs = np.full(n, -1)  # -1 = unlabeled
+
+# só rotula alguns positivos com confiança
+fraude_obs[high_confidence] = 1
+
+# opcional: adicionar alguns negativos confiáveis
+low_risk = (
+    (features['conta_nova'] == 0) &
+    (features['num_posts'] < 50) &
+    (features['num_amigos'] > 150)
+)
+
+fraude_obs[low_risk] = 0
+
+features['fraude_obs'] = fraude_obs
+
+# máscara de treino
+train_mask = fraude_obs != -1
+
+print(f"Rotulados para treino: {train_mask.sum()} / {n}")
+
+# =========================
+# 4. GRAFO
+# =========================
+
+cols = ['idade', 'genero', 'num_posts', 'num_amigos', 'conta_nova']
+scaler = StandardScaler()
+
+features[cols] = scaler.fit_transform(features[cols])
+
+G = nx.erdos_renyi_graph(n, 0.05, seed=42)
+for i in range(n):
+    G.nodes[i]['x'] = torch.tensor(features.loc[i, cols].to_numpy(), dtype=torch.float32)
 
 
-plt.title("Error over epochs")
-plt.plot(errs)
-plt.xlabel("Epochs")
-plt.ylabel("Error")
-plt.show()
+# =========================
+# 5. TREINO DO GNN
+# =========================
+
+gcn = GraphConvolutionNetwork(
+    G=G,
+    layers_dimensions=[5, 16, 8, 1],
+    output_activation=Identity(),  # logits
+    activations=[LeakyReLU(), LeakyReLU()],  # ReLU para as camadas ocultas
+    loss_func=BinaryCrossEntropyWithLogitsLoss()
+)
+
+
+T = torch.tensor(fraude_obs, dtype=torch.float32)
+
+epochs = 100
+
+for epoch in range(epochs):
+    Y = gcn.forward()
+    gcn.backward(Y, T, train_mask)
+    gcn.update(learning_rate=0.01)
+
+print(torch.sigmoid(Y))

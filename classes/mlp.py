@@ -3,7 +3,7 @@ from typing import Callable, Any, Literal
 import numpy as np
 
 
-class NeuralNetwork(Algorithm):
+class MultilayerPerceptron(Algorithm):
     def __init__(
         self,
         layers_dimensions: list[int],
@@ -14,7 +14,7 @@ class NeuralNetwork(Algorithm):
         error_function: Callable[[np.ndarray, np.ndarray, list[np.ndarray]], np.floating[Any]],
         initialization: Literal["xavier", "he"] = "xavier",
     ):
-        """Initializes a NeuralNetwork that can be used for regressions and classifications depending on the
+        """Initializes a MultilayerPerceptron that can be used for regressions and classifications depending on the
         `activation` functions passed. 
     
         Parameters
@@ -206,7 +206,6 @@ class NeuralNetwork(Algorithm):
 
             W.append(np.random.normal(0, std, (fan_in, fan_out)))
             
-            # 🔥 Bias: melhor usar zero (mais estável)
             b.append(np.zeros((1, fan_out)))
 
         for epoch in range(epochs):
