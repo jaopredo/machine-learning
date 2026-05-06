@@ -2,12 +2,19 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import torch
+import matplotlib.pyplot as plt
+import seaborn as sns
 from classes.gnn import GraphConvolutionNetwork
 from functions import Identity, LeakyReLU, BinaryCrossEntropyWithLogitsLoss
 from sklearn.preprocessing import StandardScaler
 
+print(torch.cuda.is_available())
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+    print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+
 np.random.seed(42)
-n = 200  # usuários
+n = 10000  # usuários
 
 # =========================
 # 1. FEATURES
@@ -72,6 +79,7 @@ features['fraude_obs'] = fraude_obs
 
 # máscara de treino
 train_mask = fraude_obs != -1
+train_mask = torch.tensor(train_mask, dtype=torch.bool, device=device)
 
 print(f"Rotulados para treino: {train_mask.sum()} / {n}")
 
@@ -86,7 +94,7 @@ features[cols] = scaler.fit_transform(features[cols])
 
 G = nx.erdos_renyi_graph(n, 0.05, seed=42)
 for i in range(n):
-    G.nodes[i]['x'] = torch.tensor(features.loc[i, cols].to_numpy(), dtype=torch.float32)
+    G.nodes[i]['x'] = torch.tensor(features.loc[i, cols].to_numpy(), dtype=torch.float32, device=device)
 
 
 # =========================
@@ -98,11 +106,12 @@ gcn = GraphConvolutionNetwork(
     layers_dimensions=[5, 16, 8, 1],
     output_activation=Identity(),  # logits
     activations=[LeakyReLU(), LeakyReLU()],  # ReLU para as camadas ocultas
-    loss_func=BinaryCrossEntropyWithLogitsLoss()
+    loss_func=BinaryCrossEntropyWithLogitsLoss(),
+    device=device
 )
 
 
-T = torch.tensor(fraude_obs, dtype=torch.float32)
+T = torch.tensor(fraude_obs, dtype=torch.float32, device=device)
 
 epochs = 100
 
@@ -111,4 +120,20 @@ for epoch in range(epochs):
     gcn.backward(Y, T, train_mask)
     gcn.update(learning_rate=0.01)
 
-print(torch.sigmoid(Y))
+probs = torch.sigmoid(Y).detach().squeeze().cpu().numpy()
+threshold = 0.5
+preds = (probs >= threshold).astype(int)
+
+print(probs)
+
+# Plot: predicted probabilities vs true labels (for analysis only)
+plt.figure(figsize=(8, 4))
+sns.kdeplot(probs[fraude_true == 0], fill=True, label="True 0", bw_adjust=1.2)
+sns.kdeplot(probs[fraude_true == 1], fill=True, label="True 1", bw_adjust=1.2)
+plt.axvline(threshold, color="black", linestyle="--", label=f"Threshold = {threshold:.2f}")
+plt.xlabel("Predicted probability")
+plt.ylabel("Density")
+plt.title("Model scores by true label")
+plt.legend()
+plt.tight_layout()
+plt.show()

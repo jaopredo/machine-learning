@@ -6,7 +6,7 @@ import torch.nn as nn
 
 
 class LinearLayer(nn.Module):
-    def __init__(self, dimensions: tuple[int,int], activation: nn.Module):
+    def __init__(self, dimensions: tuple[int,int], activation: nn.Module, device: torch.device|str|None=None):
         """Linear layer for Graph Convolutional Networks
 
         Args:
@@ -15,9 +15,10 @@ class LinearLayer(nn.Module):
         """
         super().__init__()
 
-        self.W = nn.Parameter(torch.randn(dimensions[0], dimensions[1]) * np.sqrt(2 / dimensions[1]))
+        self.device = torch.device(device) if device is not None else torch.device("cpu")
+        self.W = nn.Parameter(torch.randn(dimensions[0], dimensions[1], device=device) * np.sqrt(2 / dimensions[1]))
         self.activation = activation
-        self.b = nn.Parameter(torch.zeros(dimensions[1]))
+        self.b = nn.Parameter(torch.zeros(dimensions[1], device=device))
         self.H = None  # cache for backward pass
         self.Z = None  # cache for backward pass
         self.prev_Z = None  # cache for backward pass
@@ -42,7 +43,7 @@ class LinearLayer(nn.Module):
         Returns:
             torch.Tensor: Output graph features, shape (n_nodes, out_features)
         """
-        one = torch.ones(prev_Z.shape[0], 1)
+        one = torch.ones(prev_Z.shape[0], 1, device=prev_Z.device, dtype=prev_Z.dtype)
         self.prev_Z = prev_Z  # Cache the input for use in the backward pass
 
         self.H = self.A @ prev_Z @ self.W + one @ self.b.unsqueeze(0)  # shape (n_nodes, out_features)
@@ -66,7 +67,8 @@ class GraphConvolutionNetwork(nn.Module):
         layers_dimensions: list[int],
         output_activation: nn.Module,
         activations: list[nn.Module],
-        loss_func: nn.Module
+        loss_func: nn.Module,
+        device: torch.device | str | None = None
     ):
         """Initializes a MultilayerPerceptron that can be used for regressions and classifications depending on the
         `activation` functions passed. 
@@ -88,14 +90,15 @@ class GraphConvolutionNetwork(nn.Module):
         super().__init__()
 
         self.layers = nn.ModuleList()
+        self.device = torch.device(device) if device is not None else torch.device("cpu")
 
         self.G = G  # cache for backward pass
 
-        self.X = torch.stack([G.nodes[i]['x'] for i in G.nodes], dim=0)  # shape (n_nodes, in_features)
+        self.X = torch.stack([G.nodes[i]['x'] for i in G.nodes], dim=0).to(self.device)  # shape (n_nodes, in_features)
 
         # Getting a dense adjacency matrix from the input graph and converting it to a PyTorch tensor
-        self.A = torch.tensor(nx.adjacency_matrix(G).todense(), dtype=torch.float32)  # shape (n_nodes, n_nodes)
-        self.A += torch.eye(self.A.shape[0])  # Adding self-loops to the adjacency matrix
+        self.A = torch.tensor(nx.adjacency_matrix(G).todense(), dtype=torch.float32, device=self.device)  # shape (n_nodes, n_nodes)
+        self.A += torch.eye(self.A.shape[0], device=self.device)  # Adding self-loops to the adjacency matrix
 
         # Computing the degrees vector of the graph to normalize the adjacency matrix
         d = self.A.sum(dim=1)  # shape (n_nodes,)
@@ -111,12 +114,14 @@ class GraphConvolutionNetwork(nn.Module):
             if i == len(layers_dimensions) - 2:  # última camada
                 layer = LinearLayer(
                     (layers_dimensions[i], layers_dimensions[i + 1]),
-                    output_activation
+                    output_activation,
+                    self.device
                 )
             else:
                 layer = LinearLayer(
                     (layers_dimensions[i], layers_dimensions[i + 1]),
-                    activations[i]
+                    activations[i],
+                    self.device
                 )
             self.layers.append(layer)
 
