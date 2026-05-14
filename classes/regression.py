@@ -1,47 +1,85 @@
 import numpy as np
 from typing import Literal
-from classes import Algorithm
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd.functional import hessian
 
 
-class LinearRegression(Algorithm):
-    def __init__(self):
+class LinearRegression(nn.Module):
+    def __init__(
+        self,
+        X: torch.Tensor | None = None,
+        t: torch.Tensor | None = None,
+        mode: Literal['ols', 'sgd'] = 'ols',
+        c=1e-8,
+        lr=0.01,
+        n_iterations=1000,
+        stop_threshold=1e-6,
+        batch_size=32,
+        max_norm=1.0,
+        device:torch.device | None = None
+    ):
+        super().__init__()
+
+        self.device = device if device is not None else torch.device("cpu")
+
         self.theta = None
         self.X = None
         self.t = None
+        if X is not None or t is not None:
+            if X is None or t is None:
+                raise ValueError("Both X and t must be provided together")
+
+            self._fit(
+                X,
+                t,
+                mode=mode,
+                c=c,
+                lr=lr,
+                n_iterations=n_iterations,
+                stop_threshold=stop_threshold,
+                batch_size=batch_size,
+                max_norm=max_norm,
+            )
+
+    @staticmethod
+    def _add_bias(X: torch.Tensor) -> torch.Tensor:
+        if X.ndim == 1:
+            X = X.unsqueeze(0)
+        return torch.cat([torch.ones((X.shape[0], 1), device=X.device, dtype=X.dtype), X], dim=1)
 
     def ols(self, c=1e-8):
         """Calculates the optimal parameters Theta using the Normal Equation."""
-        return np.linalg.solve(self.X.T @ self.X + c * np.eye(self.X.shape[1]), self.X.T @ self.t)
+        identity = torch.eye(self.X.shape[1], device=self.device, dtype=self.X.dtype)
+        return torch.linalg.solve(self.X.T @ self.X + c * identity, self.X.T @ self.t)
 
     def sgd(self, learning_rate=0.01, n_iterations=1000, stop_threshold=1e-6, batch_size=32, max_norm=1.0):
         """Calculates the optimal parameters Theta using Stochastic Gradient Descent."""
         n, d = self.X.shape
-        theta = np.random.normal(size=d)
+        theta = torch.randn(d, device=self.device, dtype=self.X.dtype)
         previous_theta = None
         for _ in range(n_iterations):
-            previous_theta = theta.copy()
+            previous_theta = theta.clone()
             for _ in range(batch_size):
-                i = np.random.randint(n)
+                i = torch.randint(n, (1,), device=self.X.device).item()
                 xi = self.X[i:i+1]
                 ti = self.t[i:i+1]
                 gradients = 2/n * xi.T @ (xi @ theta - ti)
 
-                norm = np.linalg.norm(gradients)
-                if norm > max_norm:
+                norm = torch.norm(gradients)
+                if norm.item() > max_norm:
                     gradients = gradients / norm * max_norm
                 theta -= learning_rate * gradients.flatten()
                 
-            if np.linalg.norm(theta - previous_theta) < stop_threshold:
+            if torch.norm(theta - previous_theta).item() < stop_threshold:
                 return theta
         return theta
 
-    def fit(
+    def _fit(
             self,
-            X: np.ndarray,
-            t: np.ndarray,
+            X: torch.Tensor,
+            t: torch.Tensor,
             mode: Literal['ols', 'sgd'] = 'ols',
             c=1e-8,
             lr=0.01,
@@ -54,13 +92,13 @@ class LinearRegression(Algorithm):
         using the Normal Equation.
 
         Args:
-            X (np.ndarray): The samples to fit
-            t (np.ndarray): The labels of the training set
+            X (torch.Tensor): The samples to fit
+            t (torch.Tensor): The labels of the training set
             mode (Literal['ols', 'sgd']): The method used to calculate the optimal parameters.
             'ols' for Ordinary Least Squares, 'sgd' for Stochastic Gradient Descent.
         """
         # Add bias term to the features
-        X_b = np.hstack([np.ones((X.shape[0], 1)), X])
+        X_b = self._add_bias(X)
         self.X = X_b
         self.t = t
 
@@ -75,22 +113,28 @@ class LinearRegression(Algorithm):
                 max_norm=max_norm
             )
     
-    def predict(self, X: np.ndarray) -> np.ndarray:
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
         """Predicts the labels for the given samples using the learned parameters Theta.
 
         Args:
-            X (np.ndarray): The samples to predict
+            X (torch.Tensor): The samples to predict
         Returns:
-            np.ndarray: The predicted labels for the given samples
+            torch.Tensor: The predicted labels for the given samples
         """
         if self.theta is None:
-            raise ValueError("Model is not fitted yet. Please call fit() before predict().")
-        X_b = np.hstack([np.ones((X.shape[0], 1)), X])
-        return X_b @ self.theta
+            raise ValueError("Model is not fitted yet. Provide training data in the constructor.")
+
+        X_t = self._to_tensor(X, device=self.device, dtype=self.theta.dtype)
+        X_b = self._add_bias(X_t)
+        predictions = X_b @ self.theta
+
+        return predictions
 
 
-class LogisticRegression(Algorithm):
-    def __init__(self):
+class LogisticRegression(nn.Module):
+    def __init__(self, device: torch.device | None = None):
+        super().__init__()
+        self.device = device if device is not None else torch.device("cpu")
         self.theta = None
         self.X = None
         self.t = None
@@ -212,8 +256,10 @@ class LogisticRegression(Algorithm):
         mode: Literal['maximum_posteriori', 'laplace', 'variational']='maximum_posteriori',
         mean=None, covariance_matrix=None, epochs=10000, lr=0.01
     ):
+        X = X.to(self.device)
+        t = t.to(self.device)
         _, d = X.shape
-        theta = torch.randn(d)
+        theta = torch.randn(d, device=self.device, dtype=X.dtype)
         self.mode = mode
         self.loss_history = []
 
@@ -225,7 +271,10 @@ class LogisticRegression(Algorithm):
             if covariance_matrix is None:
                 raise ValueError("Covariance matrix must be provided for maximum posteriori mode.")
             if mean is None:
-                mean = torch.zeros(d)
+                mean = torch.zeros(d, dtype=X.dtype, device=self.device)
+            else:
+                mean = mean.to(self.device, dtype=X.dtype)
+            covariance_matrix = covariance_matrix.to(self.device, dtype=X.dtype)
             
             # Getting argmax of the posteriori: log(p(D|theta)) + log(p(theta))
             self.theta = self.maximum_posterirori(
@@ -239,7 +288,10 @@ class LogisticRegression(Algorithm):
             if covariance_matrix is None:
                 raise ValueError("Covariance matrix must be provided for laplace mode.")
             if mean is None:
-                mean = torch.zeros(d, dtype=X.dtype, device=X.device)
+                mean = torch.zeros(d, dtype=X.dtype, device=self.device)
+            else:
+                mean = mean.to(self.device, dtype=X.dtype)
+            covariance_matrix = covariance_matrix.to(self.device, dtype=X.dtype)
 
             self.theta = self.maximum_posterirori(
                 mean=mean,
@@ -254,7 +306,10 @@ class LogisticRegression(Algorithm):
             if covariance_matrix is None:
                 raise ValueError("Covariance matrix must be provided.")
             if mean is None:
-                mean = torch.zeros(d, dtype=X.dtype, device=X.device)
+                mean = torch.zeros(d, dtype=X.dtype, device=self.device)
+            else:
+                mean = mean.to(self.device, dtype=X.dtype)
+            covariance_matrix = covariance_matrix.to(self.device, dtype=X.dtype)
 
             self.variational(
                 mean=mean,
@@ -264,6 +319,7 @@ class LogisticRegression(Algorithm):
             )
     
     def predict_proba_laplace(self, X):
+        X = X.to(self.device, dtype=self.theta.dtype)
         probs = []
 
         for x in X:
@@ -278,6 +334,7 @@ class LogisticRegression(Algorithm):
         return torch.stack(probs)
     
     def predict_proba_variational(self, X, M=50):
+        X = X.to(self.device, dtype=self.theta.dtype)
         probs = []
 
         for x in X:
@@ -294,6 +351,7 @@ class LogisticRegression(Algorithm):
         return torch.stack(probs)
 
     def predict(self, X: torch.Tensor) -> torch.Tensor:
+        X = X.to(self.device, dtype=self.theta.dtype)
         if self.mode == 'laplace':
             probabilities = self.predict_proba_laplace(X)
         elif self.mode == 'maximum_posteriori':
