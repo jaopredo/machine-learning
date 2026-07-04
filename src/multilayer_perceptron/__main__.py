@@ -1,10 +1,14 @@
+import sys
+from pathlib import Path
+
+root = Path().resolve()  # aponta para machine-learning/
+if str(root) not in sys.path:
+    sys.path.insert(0, str(root))
+
 from classes.mlp import MultilayerPerceptron
-import numpy as np
 import pandas as pd
 import torch
 import matplotlib.pyplot as plt
-import seaborn as sns
-from classes.gcn import GraphConvolutionNetwork
 from functions import Identity, LeakyReLU, MeanSquaredError
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
@@ -39,10 +43,8 @@ model = MultilayerPerceptron(
 epochs = 1000
 loss_history = []
 
-for epoch in range(epochs):
+for _ in range(epochs):
     y_train = model.forward(X_train)
-    print(y_train.shape)
-    print(t_train.shape)
     model.backward(y_train, t_train)
     model.update(learning_rate=0.01)
 

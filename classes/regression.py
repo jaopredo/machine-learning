@@ -138,7 +138,7 @@ class LogisticRegression(nn.Module):
         self.theta = None
         self.X = None
         self.t = None
-        self.mode: Literal['maximum_posteriori', 'laplace']=None
+        self.mode: Literal['maximum_posteriori', 'laplace', 'variational', 'maximum_likelihood']=None
         self.loss_history = []
     
     def sigmoid(self, z):
@@ -249,13 +249,32 @@ class LogisticRegression(nn.Module):
         self.theta = mu.detach()
         self.sigma = torch.exp(rho).detach()
     
+    def maximum_likelihood(self, epochs=10000, lr=0.01):
+        n, d = self.X.shape
+        theta = torch.randn(d, dtype=self.X.dtype, device=self.X.device, requires_grad=True)
+
+        optimizer = torch.optim.SGD([theta], lr=lr)
+
+        for _ in range(epochs):
+            optimizer.zero_grad()
+
+            z = self.X @ theta
+            loss = F.binary_cross_entropy_with_logits(z, self.t, reduction='sum')
+            loss.backward()
+            self.loss_history.append(loss.item())
+            optimizer.step()
+
+        self.theta = theta.detach()
+    
     def fit(
         self,
         X: torch.Tensor,
         t: torch.Tensor,
-        mode: Literal['maximum_posteriori', 'laplace', 'variational']='maximum_posteriori',
+        mode: Literal['maximum_posteriori', 'laplace', 'variational', 'maximum_likelihood']='maximum_posteriori',
         mean=None, covariance_matrix=None, epochs=10000, lr=0.01
     ):
+        ones = torch.ones(X.shape[0], 1, device=X.device, dtype=X.dtype)
+        X = torch.cat([X, ones], dim=1)
         X = X.to(self.device)
         t = t.to(self.device)
         _, d = X.shape
@@ -317,6 +336,9 @@ class LogisticRegression(nn.Module):
                 epochs=epochs,
                 lr=lr
             )
+
+        elif mode == 'maximum_likelihood':
+            self.maximum_likelihood(epochs=epochs, lr=lr)
     
     def predict_proba_laplace(self, X):
         X = X.to(self.device, dtype=self.theta.dtype)
@@ -350,7 +372,9 @@ class LogisticRegression(nn.Module):
 
         return torch.stack(probs)
 
-    def predict(self, X: torch.Tensor) -> torch.Tensor:
+    def predict(self, X: torch.Tensor, proba=False) -> torch.Tensor:
+        ones = torch.ones(X.shape[0], 1, device=X.device, dtype=X.dtype)
+        X = torch.cat([X, ones], dim=1)
         X = X.to(self.device, dtype=self.theta.dtype)
         if self.mode == 'laplace':
             probabilities = self.predict_proba_laplace(X)
@@ -358,4 +382,8 @@ class LogisticRegression(nn.Module):
             probabilities = self.sigmoid(X @ self.theta)
         elif self.mode == 'variational':
             probabilities = self.predict_proba_variational(X)
+        elif self.mode == 'maximum_likelihood':
+            probabilities = self.sigmoid(X @ self.theta)
+        if proba:
+            return probabilities
         return (probabilities >= 0.5).float()

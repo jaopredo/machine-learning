@@ -3,6 +3,8 @@ import torch.nn as nn
 import numpy as np
 from utils.imcol import im2col, col2im
 
+from functions.relu import LeakyReLU
+
 
 class ConvolutionalLayer(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, padding, stride):
@@ -115,23 +117,6 @@ class MaxPoolLayer(nn.Module):
         dX_col = dX_col.reshape(N, C * F * F, H_out * W_out)
         dX = col2im(dX_col, self.cache["x_shape"], F, self.stride, padding=0)
 
-        return dX
-
-
-class LeakyReLU(nn.Module):
-    def __init__(self, alpha=0.0):
-        super().__init__()
-        self.alpha = alpha
-        self.cache = {
-            'input': None,
-        }
-
-    def forward(self, x):
-        self.cache['input'] = x
-        return torch.where(x > 0, x, self.alpha * x)
-
-    def backward(self, dO):
-        dX = torch.where(self.cache['input'] > 0, dO, self.alpha * dO)
         return dX
 
 
