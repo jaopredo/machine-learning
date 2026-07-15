@@ -2,27 +2,36 @@ import torch
 import torch.nn as nn
 import numpy as np
 from utils.imcol import im2col, col2im
+from utils import move_cache
 
 from functions.relu import LeakyReLU
 
 
 class ConvolutionalLayer(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, padding, stride):
+    def __init__(self, in_channels, out_channels, kernel_size, padding, stride, device: torch.device | str | None = None):
         super().__init__()
 
+        self.device = torch.device(device) if device is not None else torch.device("cpu")
         self.padding = padding
         self.stride = stride
 
         std = np.sqrt(2 / (in_channels * kernel_size * kernel_size))
-        self.W = nn.Parameter(torch.randn(out_channels, in_channels, kernel_size, kernel_size) * std)
-        self.b = nn.Parameter(torch.zeros(out_channels))
+        self.W = nn.Parameter(torch.randn(out_channels, in_channels, kernel_size, kernel_size, device=self.device) * std)
+        self.b = nn.Parameter(torch.zeros(out_channels, device=self.device))
 
         self.dW = None
         self.db = None
 
         self.cache = {}
 
+    def to(self, *args, **kwargs):
+        module = super().to(*args, **kwargs)
+        self.device = next(self.parameters()).device
+        self.cache = move_cache(self.cache, self.device)
+        return module
+
     def forward(self, x):
+        x = x.to(self.device)
         N, C, H, W = x.shape
         F = self.W.shape[-1]
 
@@ -62,6 +71,9 @@ class ConvolutionalLayer(nn.Module):
         # grad b: soma sobre N e posições espaciais
         self.db = dO_flat.sum(dim=(0, 2))                   # (kappa,)
 
+        self.W.grad = self.dW
+        self.b.grad = self.db
+
         # grad input
         # dX_col[n,c,p] = sum_k W_col[k,c] * dO_flat[n,k,p]
         dX_col = torch.einsum('kc,nkp->ncp', W_col, dO_flat)  # (N, C*F^2, H_out*W_out)
@@ -75,10 +87,18 @@ class MaxPoolLayer(nn.Module):
         super().__init__()
         self.kernel_size = kernel_size
         self.stride = stride
+        self.device = torch.device("cpu")
 
         self.cache = {}
 
+    def to(self, *args, **kwargs):
+        module = super().to(*args, **kwargs)
+        self.device = next(module.parameters(), torch.empty(0, device=self.device)).device if any(True for _ in self.parameters()) else self.device
+        self.cache = move_cache(self.cache, self.device)
+        return module
+
     def forward(self, x):
+        x = x.to(self.device)
         N, C, H, W = x.shape
         F = self.kernel_size
 
@@ -123,9 +143,10 @@ class MaxPoolLayer(nn.Module):
 class FullConectedLayer(nn.Module):
     def __init__(self, in_features, out_features):
         super().__init__()
+        self.device = torch.device("cpu")
         std = np.sqrt(2 / in_features)
-        self.W = nn.Parameter(torch.randn(out_features, in_features) * std)
-        self.b = nn.Parameter(torch.zeros(out_features))
+        self.W = nn.Parameter(torch.randn(out_features, in_features, device=self.device) * std)
+        self.b = nn.Parameter(torch.zeros(out_features, device=self.device))
 
         self.cache = {
             "input": None,
@@ -133,8 +154,15 @@ class FullConectedLayer(nn.Module):
             "pool_mask": None,
             "dropout_mask": None
         }
+
+    def to(self, *args, **kwargs):
+        module = super().to(*args, **kwargs)
+        self.device = next(self.parameters()).device
+        self.cache = move_cache(self.cache, self.device)
+        return module
     
     def forward(self, x):
+        x = x.to(self.device)
         self.cache["input"] = x
         return x @ self.W.T + self.b
     
@@ -142,6 +170,8 @@ class FullConectedLayer(nn.Module):
         x = self.cache["input"]
         self.dW = dO.T @ x
         self.db = dO.sum(dim=0)
+        self.W.grad = self.dW
+        self.b.grad = self.db
         dX = dO @ self.W
         return dX
 
@@ -152,6 +182,9 @@ class FlattenLayer(nn.Module):
         self.cache = {
             "input_shape": None
         }
+
+    def to(self, *args, **kwargs):
+        return super().to(*args, **kwargs)
 
     def forward(self, x):
         self.cache["input_shape"] = x.shape
@@ -169,8 +202,11 @@ class CNN(nn.Module):
         paddings: list[int] = [2, 0],
         strides: list[int] = [1, 1],
         relu_parameters: list[float] = None,
+        device: torch.device | str | None = None,
     ):
         super().__init__()
+
+        self.device = torch.device(device) if device is not None else torch.device("cpu")
 
         if relu_parameters is None:
             relu_parameters = [0.0] * (len(conv_dimensions) + len(connected_dimensions) - 2)
@@ -189,7 +225,8 @@ class CNN(nn.Module):
                     conv_dimensions[i][1],
                     conv_dimensions[i][2],
                     paddings[i],
-                    strides[i]
+                    strides[i],
+                    device=self.device,
                 )
             )
             self.layers.append(
@@ -210,7 +247,7 @@ class CNN(nn.Module):
 
         # descobre o tamanho da saída do flatten automaticamente
         with torch.no_grad():
-            dummy = torch.zeros(1, conv_dimensions[0][0], 32, 32)
+            dummy = torch.zeros(1, conv_dimensions[0][0], 32, 32, device=self.device)
             for layer in self.layers:
                 dummy = layer.forward(dummy)
             in_features = dummy.shape[1]
@@ -225,8 +262,17 @@ class CNN(nn.Module):
                 self.layers.append(
                     LeakyReLU(alpha=relu_parameters[len(conv_dimensions) + i - 2])
                 )
+
+    def to(self, *args, **kwargs):
+        module = super().to(*args, **kwargs)
+        self.device = next(self.parameters()).device
+        for layer in self.layers:
+            if hasattr(layer, "to"):
+                layer.to(self.device)
+        return module
     
     def forward(self, x):
+        x = x.to(self.device)
         for layer in self.layers:
             x = layer.forward(x)
         return x

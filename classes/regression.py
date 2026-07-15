@@ -3,7 +3,22 @@ from typing import Literal
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd.functional import hessian
+
+
+def _to_tensor(value: torch.Tensor | np.ndarray, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    if isinstance(value, torch.Tensor):
+        return value.to(device=device, dtype=dtype)
+    return torch.as_tensor(value, device=device, dtype=dtype)
+
+
+def _sigmoid(value: torch.Tensor) -> torch.Tensor:
+    return 1 / (1 + torch.exp(-value))
+
+
+def _move_state(value, device: torch.device):
+    if isinstance(value, torch.Tensor):
+        return value.to(device)
+    return value
 
 
 class LinearRegression(nn.Module):
@@ -76,6 +91,17 @@ class LinearRegression(nn.Module):
                 return theta
         return theta
 
+    def parameters(self):
+        return []
+
+    def to(self, *args, **kwargs):
+        module = super().to(*args, **kwargs)
+        self.device = next(self.parameters(), torch.empty(0, device=self.device)).device if any(True for _ in self.parameters()) else self.device
+        self.theta = _move_state(self.theta, self.device)
+        self.X = _move_state(self.X, self.device)
+        self.t = _move_state(self.t, self.device)
+        return module
+
     def _fit(
             self,
             X: torch.Tensor,
@@ -124,7 +150,7 @@ class LinearRegression(nn.Module):
         if self.theta is None:
             raise ValueError("Model is not fitted yet. Provide training data in the constructor.")
 
-        X_t = self._to_tensor(X, device=self.device, dtype=self.theta.dtype)
+        X_t = _to_tensor(X, device=self.device, dtype=self.theta.dtype)
         X_b = self._add_bias(X_t)
         predictions = X_b @ self.theta
 
@@ -142,18 +168,24 @@ class LogisticRegression(nn.Module):
         self.loss_history = []
     
     def sigmoid(self, z):
-        return 1 / (1 + torch.exp(-z))
+        return _sigmoid(z)
+
+    def to(self, *args, **kwargs):
+        module = super().to(*args, **kwargs)
+        self.device = next(self.parameters(), torch.empty(0, device=self.device)).device if any(True for _ in self.parameters()) else self.device
+        self.theta = _move_state(self.theta, self.device)
+        self.X = _move_state(self.X, self.device)
+        self.t = _move_state(self.t, self.device)
+        self.cov = _move_state(getattr(self, "cov", None), self.device)
+        self.sigma = _move_state(getattr(self, "sigma", None), self.device)
+        return module
 
     def maximum_posterirori(self, mean=None, covariance_matrix=None, epochs=10000, lr=0.01):
         n, d = self.X.shape
-        theta = torch.randn(d, dtype=self.X.dtype, device=self.X.device, requires_grad=True)
+        theta = torch.randn(d, dtype=self.X.dtype, device=self.X.device)
         mean = torch.zeros(d, dtype=self.X.dtype, device=self.X.device) if mean is None else mean
 
-        optimizer = torch.optim.SGD([theta], lr=lr)
-
         for _ in range(epochs):
-            optimizer.zero_grad()
-
             # logits
             z = self.X @ theta
 
@@ -169,13 +201,23 @@ class LogisticRegression(nn.Module):
 
             # queremos maximizar → minimizar o negativo
             loss = -log_posterior
-            loss.backward()
+
+            grad_likelihood = self.X.T @ (_sigmoid(z) - self.t)
+            grad_prior = torch.linalg.solve(covariance_matrix, theta - mean)
+            grad = grad_likelihood + grad_prior
+
+            grad_norm = torch.norm(grad)
+            if grad_norm.item() > 1e6:
+                grad = grad / grad_norm * 1e6
+
+            theta -= lr * grad
 
             self.loss_history.append(loss.item())
 
-            optimizer.step()
-
         return theta.detach()
+
+    def maximum_posteriori(self, mean=None, covariance_matrix=None, epochs=10000, lr=0.01):
+        return self.maximum_posterirori(mean=mean, covariance_matrix=covariance_matrix, epochs=epochs, lr=lr)
     
     def neg_log_posterior(self, theta, mean, covariance_matrix):
         z = self.X @ theta
@@ -187,13 +229,18 @@ class LogisticRegression(nn.Module):
         
         return nll + prior
 
-    def laplace(self, mean, covariance_matrix):
-        theta_map = self.theta.clone().detach().requires_grad_(True)
+    def _posterior_hessian(self, theta, covariance_matrix):
+        z = self.X @ theta
+        probs = _sigmoid(z)
+        weights = probs * (1 - probs)
+        weighted_xtx = self.X.T @ (self.X * weights.unsqueeze(1))
+        precision = torch.linalg.solve(covariance_matrix, torch.eye(covariance_matrix.shape[0], device=covariance_matrix.device, dtype=covariance_matrix.dtype))
+        return weighted_xtx + precision
 
-        H = hessian(
-            lambda th: self.neg_log_posterior(th, mean, covariance_matrix),
-            theta_map
-        )
+    def laplace(self, mean, covariance_matrix):
+        theta_map = self.theta.clone().detach()
+
+        H = self._posterior_hessian(theta_map, covariance_matrix)
 
         # regularização numérica (importante)
         eps = 1e-6
@@ -209,17 +256,15 @@ class LogisticRegression(nn.Module):
         dtype = self.X.dtype
 
         # parâmetros variacionais
-        mu = torch.randn(d, dtype=dtype, device=device, requires_grad=True)
-        rho = torch.zeros(d, dtype=dtype, device=device, requires_grad=True)  # log sigma
-
-        optimizer = torch.optim.Adam([mu, rho], lr=lr)
+        mu = torch.randn(d, dtype=dtype, device=device)
+        rho = torch.zeros(d, dtype=dtype, device=device)  # log sigma
 
         for _ in range(epochs):
-            optimizer.zero_grad()
-
             sigma = torch.exp(rho)
 
-            elbo = 0.0
+            elbo = torch.tensor(0.0, dtype=dtype, device=device)
+            grad_mu = torch.zeros_like(mu)
+            grad_rho = torch.zeros_like(rho)
 
             for _ in range(M):
                 eps = torch.randn(d, dtype=dtype, device=device)
@@ -239,30 +284,37 @@ class LogisticRegression(nn.Module):
 
                 elbo += log_likelihood + log_prior - log_q
 
+                probs = _sigmoid(z)
+                grad_theta = self.X.T @ (probs - self.t)
+                grad_theta += torch.linalg.solve(covariance_matrix, theta - mean)
+
+                grad_mu += grad_theta
+                grad_rho += grad_theta * sigma * eps
+
             elbo = elbo / M
 
             loss = -elbo
-            loss.backward()
             self.loss_history.append(loss.item())
-            optimizer.step()
+
+            grad_mu = grad_mu / M
+            grad_rho = grad_rho / M
+
+            mu -= lr * grad_mu
+            rho -= lr * grad_rho
 
         self.theta = mu.detach()
         self.sigma = torch.exp(rho).detach()
     
     def maximum_likelihood(self, epochs=10000, lr=0.01):
         n, d = self.X.shape
-        theta = torch.randn(d, dtype=self.X.dtype, device=self.X.device, requires_grad=True)
-
-        optimizer = torch.optim.SGD([theta], lr=lr)
+        theta = torch.randn(d, dtype=self.X.dtype, device=self.X.device)
 
         for _ in range(epochs):
-            optimizer.zero_grad()
-
             z = self.X @ theta
             loss = F.binary_cross_entropy_with_logits(z, self.t, reduction='sum')
-            loss.backward()
+            grad = self.X.T @ (_sigmoid(z) - self.t)
+            theta -= lr * grad
             self.loss_history.append(loss.item())
-            optimizer.step()
 
         self.theta = theta.detach()
     
@@ -278,11 +330,9 @@ class LogisticRegression(nn.Module):
         X = X.to(self.device)
         t = t.to(self.device)
         _, d = X.shape
-        theta = torch.randn(d, device=self.device, dtype=X.dtype)
         self.mode = mode
         self.loss_history = []
 
-        self.theta = theta
         self.X = X
         self.t = t
 

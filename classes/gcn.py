@@ -3,6 +3,8 @@ import networkx as nx
 import torch
 import torch.nn as nn
 
+from utils import move_cache
+
 
 class LinearLayer(nn.Module):
     def __init__(self, dimensions: tuple[int,int], activation: nn.Module, device: torch.device|str|None=None):
@@ -23,6 +25,17 @@ class LinearLayer(nn.Module):
         self.prev_Z = None  # cache for backward pass
         self.A = None  # cache for backward pass
         self.D = None  # cache for backward pass
+
+    def to(self, *args, **kwargs):
+        module = super().to(*args, **kwargs)
+        device = next(self.parameters()).device
+        self.device = device
+        self.H = move_cache(self.H, device)
+        self.Z = move_cache(self.Z, device)
+        self.prev_Z = move_cache(self.prev_Z, device)
+        self.A = move_cache(self.A, device)
+        self.D = move_cache(self.D, device)
+        return module
 
     def set_adjacency_matrix(self, A: torch.Tensor):
         """Sets the adjacency matrix for the current layer. This method should be called before the forward pass of the layer.
@@ -122,6 +135,20 @@ class GraphConvolutionNetwork(nn.Module):
             if isinstance(layer, LinearLayer):
                 layer.set_adjacency_matrix(self.norm_A)  # Set the normalized adjacency matrix for the current layer
             self.layers.append(layer)
+
+    def to(self, *args, **kwargs):
+        module = super().to(*args, **kwargs)
+        device = next(self.parameters()).device
+        self.device = device
+        self.X = self.X.to(device)
+        self.A = self.A.to(device)
+        self.norm_A = self.norm_A.to(device)
+        for layer in self.layers:
+            if hasattr(layer, "to"):
+                layer.to(device)
+            if hasattr(layer, "set_adjacency_matrix"):
+                layer.set_adjacency_matrix(self.norm_A)
+        return module
 
 
     def forward(self):
