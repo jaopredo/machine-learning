@@ -66,7 +66,6 @@ class GraphConvolutionNetwork(nn.Module):
         layers_dimensions: list[int],
         output_activation: nn.Module,
         activations: list[nn.Module],
-        loss_func: nn.Module,
         device: torch.device | str | None = None
     ):
         """Initializes a MultilayerPerceptron that can be used for regressions and classifications depending on the
@@ -106,8 +105,6 @@ class GraphConvolutionNetwork(nn.Module):
         D = torch.diag(d_inv_sqrt)  # shape (n_nodes, n_nodes)
         self.norm_A = D @ self.A @ D  # Normalized adjacency matrix, shape (n_nodes, n_nodes)
 
-        self.loss_func: nn.Module = loss_func
-
         for i in range(len(layers_dimensions) - 1):
             layer = None
             if i == len(layers_dimensions) - 2:  # última camada
@@ -141,21 +138,23 @@ class GraphConvolutionNetwork(nn.Module):
             Z = layer.forward(Z)
         return Z
 
-    def backward(self, Y: torch.Tensor, T: torch.Tensor, mask: torch.Tensor, penalty: float = 0.001):
+    def backward(self, dO: torch.Tensor, T: torch.Tensor, mask: torch.Tensor, penalty: float = 0.001):
         # Loss
-        Y = Y.squeeze()  # shape (n_nodes,)
-        loss = self.loss_func(Y[mask], T[mask])
+        if dO.dim() != T.dim():
+            dO = dO.squeeze()
+            T = T.squeeze()
         
         # Gradient Loss
-        dZ = torch.zeros_like(Y)
-        dZ[mask] = self.loss_func.backward(Y[mask], T[mask])
+        dZ = torch.zeros_like(dO)
+        dZ[mask] = self.loss_func.backward(dO[mask], T[mask])
 
         if dZ.dim() == 1:
             dZ = dZ.unsqueeze(1)
-
+        
         # Backpropagation through layers
         for layer in reversed(self.layers):
             dZ = layer.backward(dZ, penalty)
+        
     
     def update(self, learning_rate: float, max_norm: float = 5.0):
         with torch.no_grad():
