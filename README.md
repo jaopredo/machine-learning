@@ -49,41 +49,25 @@ Por isso, este projeto busca um equilíbrio entre:
 ```text
 machine-learning/
 
-models/
-│
-├── logistic_regression.py
-├── multilayer_perceptron.py
-├── ...
-│
-layers/
-│
-├── linear.py
-├── activations.py
-├── ...
-│
+functions/          # ativações e losses manuais
 losses/
-│
-├── mse.py
-├── binary_cross_entropy.py
-├── cross_entropy.py
-│
 optimizers/
-│
-├── sgd.py
-├── ...
-│
 trainers/
+utils/
+
+notebooks/          # modelos implementados inline em células
 │
-├── trainer.py
-│
-datasets/
-│
-├── ...
-│
-notebooks/
-│
-├── ...
+├── knn.ipynb
+├── linear_regression.ipynb
+├── logistic_regression.ipynb
+├── pca.ipynb
+├── mixture_gaussians.ipynb
+├── cnn.ipynb
+├── gcn.ipynb       # também contém o MultilayerPerceptron
+└── ...
 ```
+
+Os modelos vivem nos notebooks (tensores no `device` definido). Pacotes auxiliares (`utils`, `functions`, `trainers`, `optimizers`) continuam importáveis.
 
 ---
 
