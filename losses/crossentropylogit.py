@@ -37,9 +37,13 @@ class CrossEntropyLogit(Loss):
         return grad
 
     @property
-    def prediction(self) -> torch.Tensor | None:
+    def prediction(self) -> torch.Tensor:
+        if self._prediction is None:
+            raise ValueError("No predictions available. You must call forward() before accessing prediction.")
         return self._prediction
 
     @property
-    def target(self) -> torch.Tensor | None:
+    def target(self) -> torch.Tensor:
+        if self._target is None:
+            raise ValueError("No targets available. You must call forward() before accessing target.")
         return self._target
