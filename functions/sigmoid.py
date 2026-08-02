@@ -1,16 +1,22 @@
 import torch
-import torch.nn as nn
+from core import Module
 
 
-class Sigmoid(nn.Module):
+class Sigmoid(Module):
     def __init__(self):
-        super().__init__()
-        self.out = None  # cache para a passagem backward
+        self.out: torch.Tensor | None = None  # cache the output for backward pass
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         self.out = 1 / (1 + torch.exp(-x))
         return self.out
 
-    def backward(self, d_output: torch.Tensor) -> torch.Tensor:
+    def backward(self, dout: torch.Tensor) -> torch.Tensor:
+        if self.out is None:
+            raise ValueError("Forward pass must be called before backward pass.")
         sigmoid_derivative = self.out * (1 - self.out)
-        return d_output * sigmoid_derivative
+        return dout * sigmoid_derivative
+
+    def to(self, device: torch.device):
+        if self.out is not None:
+            self.out = self.out.to(device)
+        return self

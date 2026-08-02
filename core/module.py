@@ -1,35 +1,27 @@
-from __future__ import annotations
-
-from abc import ABC
-from collections.abc import Iterable
-
 import torch
+from abc import ABC, abstractmethod
+from .parameter import Parameter
 
 
 class Module(ABC):
-    def forward(self, *args, **kwargs):
-        raise NotImplementedError()
+    @abstractmethod
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        pass
 
-    def backward(self, *args, **kwargs):
-        raise NotImplementedError()
+    @abstractmethod
+    def backward(self, dout: torch.Tensor) -> torch.Tensor:
+        pass
 
-    def parameters(self) -> list[torch.nn.Parameter]:
-        return []
+    @abstractmethod
+    def to(self, device: torch.device) -> "Module":
+        pass
 
-    def to(self, device: torch.device | str):
-        return self
+    def parameters(self) -> list[Parameter]:
+        params: list[Parameter] = []
 
-    def zero_grad(self):
-        for parameter in self.parameters():
-            if parameter.grad is not None:
-                parameter.grad.zero_()
+        for attr_name in dir(self):
+            attr = getattr(self, attr_name)
+            if isinstance(attr, Parameter):
+                params.append(attr)
 
-    @staticmethod
-    def _move_tensor(value, device: torch.device):
-        if isinstance(value, torch.Tensor):
-            return value.to(device)
-        return value
-
-    @staticmethod
-    def _move_nested(values: Iterable, device: torch.device):
-        return [Module._move_tensor(value, device) for value in values]
+        return params
