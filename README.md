@@ -144,19 +144,6 @@ As atualizações são implementadas manualmente para facilitar o entendimento d
 
 ---
 
-## Trainers
-
-Os trainers são responsáveis pelo fluxo de treinamento.
-
-Responsabilidades:
-
-* Loop de treinamento
-* Avaliação
-* Atualização dos parâmetros
-* Monitoramento de métricas
-
----
-
 # Algoritmos Implementados
 
 A lista abaixo representa os algoritmos presentes atualmente ou planejados para o projeto.
@@ -178,35 +165,6 @@ A lista abaixo representa os algoritmos presentes atualmente ou planejados para 
 * Graph Convolutional Networks (GCN)
 * Generative Adversarial Networks (GAN)
 * Variational Autoencoders (VAE)
-
----
-
-# Exemplo de Uso
-
-```python
-model = MultilayerPerceptron(
-    layers_dimensions=[64, 32, 16, 10]
-)
-
-loss_fn = CrossEntropyLoss()
-
-optimizer = SGD(
-    model.parameters(),
-    lr=0.01
-)
-
-trainer = Trainer(
-    model=model,
-    loss_fn=loss_fn,
-    optimizer=optimizer
-)
-
-trainer.fit(
-    X_train,
-    y_train,
-    epochs=100
-)
-```
 
 ---
 
