@@ -7,6 +7,20 @@ O principal objetivo do projeto é estudar e compreender o funcionamento interno
 Embora o projeto utilize PyTorch como infraestrutura para manipulação de tensores e operações matriciais, a lógica dos algoritmos é implementada manualmente para facilitar o aprendizado dos conceitos matemáticos e computacionais envolvidos.
 
 ---
+# Como instalar
+
+Para o funcionamento do repositório de forma automática, foi criado um arquivo `Makefile` contendo os comandos para instalação. Para preparar seu ambiente
+```sh
+make setup
+```
+esse comando automaticamente instala as dependências e detecta se seu computador possui uma placa de vídeo instalada e baixa os pacotes torch adaptados para a sua necessidade (AMD = ROCm, NVIDEA = CUDA, Nenhum = CPU)
+
+Se você possui placa de vídeo, mas não quer utilizar ela para rodar os modelos, você pode forçar o make para fazer o setup de cpu
+```sh
+make setup-cpu
+```
+
+---
 
 # Objetivos
 
@@ -141,42 +155,6 @@ Exemplos:
 * Adam (quando implementado)
 
 As atualizações são implementadas manualmente para facilitar o entendimento do processo de otimização.
-
----
-
-# Algoritmos Implementados
-
-A lista abaixo representa os algoritmos presentes atualmente ou planejados para o projeto.
-
-## Machine Learning
-
-* Logistic Regression
-* Decision Tree
-* Random Forest
-* K-Means
-* Gaussian Mixture Models (GMM)
-* Principal Component Analysis (PCA)
-
-## Deep Learning
-
-* Multilayer Perceptron (MLP)
-* Autoencoders
-* Graph Neural Networks (GNN)
-* Graph Convolutional Networks (GCN)
-* Generative Adversarial Networks (GAN)
-* Variational Autoencoders (VAE)
-
----
-
-# Princípios de Desenvolvimento
-
-Ao adicionar novos algoritmos ao projeto:
-
-1. Preserve a implementação manual dos conceitos.
-2. Evite utilizar abstrações prontas que ocultem o funcionamento interno.
-3. Mantenha compatibilidade com a arquitetura modular.
-4. Priorize clareza e valor educacional em vez de otimizações prematuras.
-5. Documente decisões importantes e referências utilizadas.
 
 ---
 
