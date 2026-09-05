@@ -166,6 +166,7 @@ As implementações deste repositório são baseadas em:
 * Livros clássicos de Machine Learning e Deep Learning.
 * Documentação oficial do PyTorch.
 * Pattern Recognition and Machine Learning (Christopher Bishop).
+* Meu outro repositório em conjunto com meus colegas de faculdade sobre as matérias do curso: [Holy Emapian Scripture](https://github.com/Holy-Emapian-Scripture/holy-emapian-scripture)
 
 ---
 
