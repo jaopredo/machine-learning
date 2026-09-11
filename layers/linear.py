@@ -12,8 +12,6 @@ class LinearLayer(Module):
         self.x: torch.Tensor | None = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if x.device != self.__device:
-            raise TypeError(f"Input tensor is on device {x.device}, but layer is on device {self.__device}.")
         self.x = x
         out = x @ self.W + self.b
         return out
@@ -27,6 +25,7 @@ class LinearLayer(Module):
         self.W.accumulate_grad(self.x.T @ dout)
         self.b.accumulate_grad(torch.sum(dout, dim=0))
         dx = dout @ self.W.T
+
         return dx
 
     def to(self, device: torch.device):
